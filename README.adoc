@@ -49,6 +49,45 @@ Here are the steps I took to get the NUCs ready for my cluster. The NUCs I bough
 
 Once all that was done, I powered off the NUCs and turned my attention to the Pi that would be the gateway to my cluster.
 
+== Setting up my laptop
+
+There are a few things I needed to do locally on my laptop:
+
+* Generate manifests and ignition files
+* Serve the ignition files and installer to the cluster
+* Run a VM for the bootstrap machine
+* Monitoring installation
+
+Monitoring the installation process is covered in the install docs so I'll skip that here.
+
+=== Generating manifests and ignitions
+
+These steps followed the installation docs very closely so I won't rehash them here. I'll note several caveats that either tripped me up or I had to stay mindful of so you don't make the same mistakes.
+
+* Ignition configs include certificates that only last 24 hours. So if installation fails or gets spread out, make sure to regenerate ignition configs.
+* Remember that the `create-ignition-configs` task blows away your `install-config.yaml` file so keep a copy safe.
+* If you redo things, make sure to remove the `.openshift_install_state.json` file since it includes the short-lived certs and gets reused.
+
+=== Serving ignitions and installer
+
+I used my Mac to serve the ignition files and compressed metal RAW image. I could have done this from the Pi, but I already had apache set up and ready to go and it allowed me to skip copying the ignition files over to the Pi. I'll skip the details on this but you'll need all three `.ign` files plus the compressed metal RAW image file on an HTTP server accessible from the cluster.
+
+=== Bootstrap VM
+
+I used VirtualBox to run the VM that acts as the boostrap machine for the cluster. In retrospect, it would have been easier to just use the CoreOS ISO but I wanted to learn more about PXE booting so it was down another rabbit hole for me.
+
+Here are the settings I used for my VM:
+
+* 12GB RAM
+* 4 CPU
+* Network boot first
+* 120GB disk
+* Bridged adapter
+** Bridged to my wired ethernet (`en13` in my case)
+** *Important:* Adapter type: Intel PRO/1000 MT Desktop
+** *Important:* Promiscuous mode: Allow all
+** Make a note of the MAC address
+
 == Setting up the Pi
 
 I'll skip the instructions on getting the Raspberry Pi up and running on my network, but I did a very vanilla Raspberry Pi OS (Raspbian) install. It's also a good idea to add your SSH key to the `authorized_keys` on the Pi so that you don't have to worry about password when logging in.
