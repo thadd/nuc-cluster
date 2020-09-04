@@ -45,8 +45,92 @@ Once all that was done, I powered off the NUCs and turned my attention to the Pi
 
 I'll skip the instructions on getting the Raspberry Pi up and running on my network, but I did a very vanilla Raspberry Pi OS (Raspbian) install. It's also a good idea to add your SSH key to the `authorized_keys` on the Pi so that you don't have to worry about password when logging in.
 
+The two additional bits of setup I did was to set the Pi's hostname to `gateway` and give the ethernet interface a static IP address of `10.10.10.1`.
+
 ### haproxy
 
 OpenShift requires a load balancer in front of your cluster. For my installation, I did this by installing haproxy on my Raspberry Pi (using the built-in package manager) and configuring it for OpenShift traffic.
 
 I've added my config file to this repo at [`haproxy.cfg`](haproxy.cfg). There are no domain names in there so you should be able to copy it directly if you're building a cluster following this guide.
+
+### dnsmasq
+
+The bulk of the work done by the Pi is done by dnsmasq. It provides a DHCP server, a DNS server, and a TFTP server for PXE booting. The full config is at [`dnsmasq.conf`](dnsmasq.conf), but I'm going to copy most of it here to explain the sections.
+
+```
+expand-hosts
+no-dhcp-interface=wlan0
+```
+
+This section tells dnsmasq to pull hostnames from `/etc/hosts` and not to offer DHCP to our wifi network.
+
+```
+local=/openshift.thadd.dev/
+domain=openshift.thadd.dev
+```
+
+This defines the domain name for our OpenShift cluster. This will need to match the `<cluster_name>.<domain_name>` that you use later in your OpenShift installation.
+
+```
+dhcp-range=10.10.10.100,10.10.10.250,12h
+
+dhcp-host=08:00:27:b9:41:18,bootstrap,10.10.10.5
+
+dhcp-host=1c:69:7a:09:6f:4c,master-0,10.10.10.10
+dhcp-host=1c:69:7a:09:79:9b,master-1,10.10.10.11
+dhcp-host=1c:69:7a:09:70:fd,master-2,10.10.10.12
+
+dhcp-host=1c:69:7a:09:79:e0,worker-0,10.10.10.20
+dhcp-host=1c:69:7a:09:71:e7,worker-1,10.10.10.21
+
+dhcp-host=a0:ce:c8:d2:17:e4,manager,10.10.10.200
+```
+
+These are our DHCP reservations. You'll plug in the MAC addresses of your NUCs here.
+
+For the `bootstrap` line, you'll use the MAC address of your VirtualBox VM that we'll set up later so you can leave this as-is for now and we'll set it when we get to that step.
+
+The last entry, `manager` is the MAC address for the *wired* connection on my laptop. This is how we'll serve up ignition files and monitor the install process.
+
+```
+address=/bootstrap.openshift.thadd.dev/10.10.10.5
+address=/master-0.openshift.thadd.dev/10.10.10.10
+address=/master-1.openshift.thadd.dev/10.10.10.11
+address=/master-2.openshift.thadd.dev/10.10.10.12
+address=/worker-0.openshift.thadd.dev/10.10.10.20
+address=/worker-1.openshift.thadd.dev/10.10.10.21
+```
+
+These are DNS records for the cluster machines.
+
+```
+address=/api.openshift.thadd.dev/10.10.10.1
+address=/api-int.openshift.thadd.dev/10.10.10.1
+address=/.apps.openshift.thadd.dev/10.10.10.1
+```
+
+These DNS records are required by OpenShift. Note that they all point back to our Pi which is where our load balancer will run. These DNS records are only accessible _inside_ our network that's managed by the Pi but not outside. We'll handle outside DNS later.
+
+```
+dhcp-match=set:efi-x86_64,option:client-arch,7
+dhcp-boot=tag:efi-x86_64,grubx64.efi
+```
+
+This section sets up PXE booting for UEFI devices, which includes our NUCs.
+
+```
+dhcp-boot=pxelinux/pxelinux.0
+```
+
+Set up PXE booting for non-UEFI clients (our bootstrap VM).
+
+```
+enable-tftp
+tftp-root=/var/lib/tftpboot
+```
+
+Set up the TFTP server to send the PXE booting assets to clients.
+
+### TFTP and PXE boot
+
+Next we need to create `/var/lib/tftpboot` and start adding assets.
