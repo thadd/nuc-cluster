@@ -1,0 +1,6 @@
+DEFAULT pxeboot
+TIMEOUT 20
+PROMPT 0
+LABEL pxeboot
+    KERNEL http://manager.openshift.thadd.dev/~tselden/rhcos-installer-kernel-x86_64
+    APPEND ip=dhcp rd.neednet=1 initrd=http://manager.openshift.thadd.dev/~tselden/rhcos-installer-initramfs.x86_64.img console=tty0 console=ttyS0 coreos.inst=yes coreos.inst.install_dev=sda coreos.inst.image_url=http://manager.openshift.thadd.dev/~tselden/rhcos-4.5.6-x86_64-metal.x86_64.raw.gz coreos.inst.ignition_url=http://manager.openshift.thadd.dev/~tselden/bootstrap.ign 

@@ -1,0 +1,7 @@
+set default="1"
+set timeout=20
+
+menuentry 'Install Red Hat Enterprise Linux CoreOS (Bootstrap)' --class fedora --class gnu-linux --class gnu --class os {
+  linuxefi rhcos-installer-kernel-x86_64 nomodeset rd.neednet=1 coreos.inst=yes coreos.inst.install_dev=sda coreos.inst.image_url=http://manager.openshift.thadd.dev/~tselden/rhcos-4.5.6-x86_64-metal.x86_64.raw.gz coreos.inst.ignition_url=http://manager.openshift.thadd.dev/~tselden/bootstrap.ign
+  initrdefi rhcos-installer-initramfs.x86_64.img 
+}

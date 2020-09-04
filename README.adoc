@@ -37,7 +37,9 @@ image::cluster-arch.png[]
 
 You can see we're using the Pi to bridge my home wifi network to the cluster network. There are times when I hooked my MacBook Pro to the wired network so I also needed a way to plug an ethernet cable to my Mac.
 
-== Setting up the NUCs
+== Getting ready for installation
+
+=== Setting up the NUCs
 
 Here are the steps I took to get the NUCs ready for my cluster. The NUCs I bought came preinstalled with Windows so it was tricky at first to get into BIOS. Mashing F2 (Fn-F2 on my keyboard) caught it reliably.
 
@@ -49,7 +51,7 @@ Here are the steps I took to get the NUCs ready for my cluster. The NUCs I bough
 
 Once all that was done, I powered off the NUCs and turned my attention to the Pi that would be the gateway to my cluster.
 
-== Setting up my laptop
+=== Setting up my laptop
 
 There are a few things I needed to do locally on my laptop:
 
@@ -60,7 +62,7 @@ There are a few things I needed to do locally on my laptop:
 
 Monitoring the installation process is covered in the install docs so I'll skip that here.
 
-=== Generating manifests and ignitions
+==== Generating manifests and ignitions
 
 These steps followed the installation docs very closely so I won't rehash them here. I'll note several caveats that either tripped me up or I had to stay mindful of so you don't make the same mistakes.
 
@@ -68,11 +70,11 @@ These steps followed the installation docs very closely so I won't rehash them h
 * Remember that the `create-ignition-configs` task blows away your `install-config.yaml` file so keep a copy safe.
 * If you redo things, make sure to remove the `.openshift_install_state.json` file since it includes the short-lived certs and gets reused.
 
-=== Serving ignitions and installer
+==== Serving ignitions and installer
 
 I used my Mac to serve the ignition files and compressed metal RAW image. I could have done this from the Pi, but I already had apache set up and ready to go and it allowed me to skip copying the ignition files over to the Pi. I'll skip the details on this but you'll need all three `.ign` files plus the compressed metal RAW image file on an HTTP server accessible from the cluster.
 
-=== Bootstrap VM
+==== Bootstrap VM
 
 I used VirtualBox to run the VM that acts as the boostrap machine for the cluster. In retrospect, it would have been easier to just use the CoreOS ISO but I wanted to learn more about PXE booting so it was down another rabbit hole for me.
 
@@ -88,19 +90,32 @@ Here are the settings I used for my VM:
 ** *Important:* Promiscuous mode: Allow all
 ** Make a note of the MAC address
 
-== Setting up the Pi
+****
+Note that at least for me, I had to change the adapter type otherwise PXE never downloaded the CoreOS image. (To be perfect honest, I'm not sure if it was changing the adapter type of the promiscuous mode that fixed that issue - I was really at my wits end just toggling things to get it to work - but changing both seems to have no ill effects so just change both).
+****
+
+=== Setting up the Pi
 
 I'll skip the instructions on getting the Raspberry Pi up and running on my network, but I did a very vanilla Raspberry Pi OS (Raspbian) install. It's also a good idea to add your SSH key to the `authorized_keys` on the Pi so that you don't have to worry about password when logging in.
 
 The two additional bits of setup I did was to set the Pi's hostname to `gateway` and give the ethernet interface a static IP address of `10.10.10.1`.
 
-=== haproxy
+==== haproxy
 
 OpenShift requires a load balancer in front of your cluster. For my installation, I did this by installing haproxy on my Raspberry Pi (using the built-in package manager) and configuring it for OpenShift traffic.
 
 I've added my config file to this repo at link:haproxy.cfg[`haproxy.cfg`]. There are no domain names in there so you should be able to copy it directly if you're building a cluster following this guide.
 
-=== dnsmasq
+==== firewall
+
+The Pi needs a firewall configured to allow traffic into and out of the network. I'm not a network guy so I kept this as simple as possible and installed `firewalld`. Then I added DHCP and masquerading and called it done.
+
+....
+sudo firewall-cmd --add-service=dhcp --permanent
+sudo firewall-cmd --add-masquerade --permanent
+....
+
+==== dnsmasq
 
 The bulk of the work done by the Pi is done by dnsmasq. It provides a DHCP server, a DNS server, and a TFTP server for PXE booting. The full config is at link:dnsmasq.conf[`dnsmasq.conf`], but I'm going to copy most of it here to explain the sections.
 
@@ -178,7 +193,7 @@ tftp-root=/var/lib/tftpboot
 
 Set up the TFTP server to send the PXE booting assets to clients.
 
-=== TFTP and PXE boot
+==== TFTP and PXE boot
 
 Next I created `/var/lib/tftpboot` and started adding assets. This is where things got tricky. Below is the file layout of this directory when all was said and done, but I'll explain each group of files as I go.
 
@@ -213,4 +228,97 @@ Next I needed some files from RPMs. I grabbed them from the RHEL RPMs but it wou
 * From `syslinux-tftpboot`, grab `pxelinux.0` and `ldlinux.c32`
 * From `grub2-efi-x64`, grab `grubx64.efi`
 
-Next up was setting up the config files.
+Next up was setting up the config files. Remember that we have two different boot mechanisms UEFI for the NUCs and legacy for the bootstrap VM. Let's look at PXE first (!link:default[config file])
+
+....
+DEFAULT pxeboot
+TIMEOUT 20
+PROMPT 0
+LABEL pxeboot
+    KERNEL http://manager.openshift.thadd.dev/~tselden/rhcos-installer-kernel-x86_64
+    APPEND ip=dhcp rd.neednet=1 initrd=http://manager.openshift.thadd.dev/~tselden/rhcos-installer-initramfs.x86_64.img console=tty0 console=ttyS0 coreos.inst=yes coreos.inst.install_dev=sda coreos.inst.image_url=http://manager.openshift.thadd.dev/~tselden/rhcos-4.5.6-x86_64-metal.x86_64.raw.gz coreos.inst.ignition_url=http://manager.openshift.thadd.dev/~tselden/bootstrap.ign
+....
+
+Basically what this is saying is to get all of the boot assets from an HTTP server, `manager`, which is hosted on my Mac. We pass in additional params that are included in the install docs that CoreOS needs and make sure to include the `boostrap.ign` ignition file since the bootstrap VM is the only machine PXE booting in legacy mode.
+
+Now to the UEFI clients. This one was harder since the OpenShift install docs don't say anything about what to do for UEFI and don't include a sample `grub.cfg` anymore. Below is the !link:grub.cfg.master[master version] but the worker and bootstrap are the same, just with different ignition files.
+
+....
+set default="1"
+set timeout=20
+
+menuentry 'Install Red Hat Enterprise Linux CoreOS (Master)' --class fedora --class gnu-linux --class gnu --class os {
+  linuxefi rhcos-installer-kernel-x86_64 nomodeset rd.neednet=1 coreos.inst=yes coreos.inst.install_dev=sda coreos.inst.image_url=http://manager.openshift.thadd.dev/~tselden/rhcos-4.5.6-x86_64-metal.x86_64.raw.gz coreos.inst.ignition_url=http://manager.openshift.thadd.dev/~tselden/master.ign
+  initrdefi rhcos-installer-initramfs.x86_64.img
+}
+....
+
+Again, this looks pretty similar to the PXE version with the minor difference that it's going to get the initrd and kernel from the TFTP server (I couldn't figure out how to get them via HTTP).
+
+Now that we have the three config files I had to figure out how to get the right ones handed to the right machines. That's where the symlinks come in:
+
+[NOTE]
+====
+The docs are really unclear on this, but if you're PXE booting with legacy systems, you'll need to do this same thing with the `pxelinux.cfg/default` files. You have to send the correct ignition files to the correct machines otherwise they don't know what mode they're in.
+====
+
+When GRUB boots via PXE, it looks for configuration files based on a number of things. First it looks for a config file based on its MAC address, then for one on IP address, then just pulls the default (https://wiki.syslinux.org/wiki/index.php?title=PXELINUX#Configuration[more details here]). In our case, we're using IP addresses (which are coded into hex) so the file `grub.cfg-0A0A0A0B` will get delivered to a client with IP `10.10.10.11`.
+
+Now that we know this, we just have to add symlinks for all of our nodes based on their IPs and node types. Note that I included the bootstrap configuration here too even though it's not UEFI just for consistency's sake.
+
+== Installing
+
+At this point we've configured our Mac for bootstrapping and serving boot assets and ignition files, set up the Pi for load balancing, DNS, DHCP, and PXE booting, and we're ready to actually install OpenShift! Let's do that.
+
+=== Master nodes
+
+At this point the machines are ready for their first PXE boot. I did this process one at a time, waiting to move on to the next NUC until they were sitting at the CoreOS login screen. After firing up the NUC, it should get the PXE boot and show the GRUB boot menu. It'll default to CoreOS installation and download the files from the Mac (note that the screen goes black for a few seconds while it downloads the large compressed metal RAW image so don't assume it failed for at least a few minutes).
+
+Watch the boot closely and you'll see it download the image, write to disk, and reboot. After CoreOS is written to disk, drop back into BIOS on the next boot and change the boot order back to SATA first.
+
+[NOTE]
+====
+*Important*: be sure to catch it on this reboot because otherwise it'll PXE boot again the next time and just keep wiping/reinstalling the drive.
+====
+
+Once this is done for all three master nodes, it's time to start the bootstrap.
+
+==== Bootstrap node
+
+Next up was starting the bootstrap VM from VirtualBox. This one didn't need to switch the boot order, once there's a bootable disk, VirtualBox switches the order automatically so just keep an eye on it to make sure it PXE boots, downloads the images (again, give it a few minutes) and reboots to a CoreOS login prompt.
+
+At this point, the install should be progressing automatically. You can use the `openshift-install` program to wait on the bootstrap process to complete. After 10 minutes or so you should see a message that the kubernetes API is up and running and this is the first success beacon. 30 minutes after that bootstrapping is done (you'll see a message from the installer) and you can shut down the VM and turn to the worker nodes.
+
+==== Worker nodes
+
+At this point OpenShift is technically up and running but most of the core services aren't ready. When bootstrapping is complete, follow the install docs instructions to get your OpenShift command-line working. You should be able to access the API at this point and run a few `oc` commands.
+
+I found using the following command was really helpful to know how it was progressing overall (note that you'll need to install `watch` via homebrew or whatever you use if you don't have it already)
+
+....
+watch -n5 oc get clusteroperators
+....
+
+With that monitoring in place, the process for booting the workers is exactly the same as the master nodes. Once their at the CoreOS login prompts, it's just a waiting game. Fire up the installers `wait-for install-complete` and when it's all done you should see the `kubeadmin` password on your console. Note that for me, there were still a bunch of cluster operators not fully up so I just waiting until all the cluster operators were available.
+
+== Logging in
+
+The last thing is to get logged in. Here I'll leave some exercises to the reader, but there's two things to consider: DNS and certificates.
+
+=== DNS
+
+If you recall from my architecture diagram, I've had my Mac connected to the wired side of my cluster network this whole time. To be useful, it needs to go over wifi. So, the final step is to set up my DNS (in my case for `openshift.thadd.dev`) to point to the wifi address of my Pi. Once that's done, I can log into my cluster over wifi from anywhere on my network. I'll set up port forwarding and whatnot on my router later so that I can get to my cluster from the outside internet, but that's a task for later.
+
+=== Certificates
+
+When I went to log into my cluster for the first time I hit a block in my browser. Basically it didn't like OpenShift's self-signed certificate and I couldn't simply override it. So, I had to download the certificate, load it into keychain, and explicitly set my computer to trust the CA. I'll set up Let's Encrypt later, but that got me access to my cluster.
+
+== Conclusion
+
+image:cluster-screenshot.png[]
+
+I finally have my OpenShift cluster up and running locally. I'm sure I'll have more thoughts on things as I play around with it and learn how things work even more, but it's exactly the platform I wanted for tinkering. Again, it's not the cheapest way to do things (all told I spent about $1,700 on the NUCs, switch, and Pi), but it hits every one of my requirements.
+
+In coming weeks I'll build a carrying case for everything so it's actually portable and will likely share that process here as well. Until then, feel free to ping me if you have any questions, suggestions, or just want to dig into something in more detail.
+
+Thanks for reading!
