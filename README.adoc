@@ -10,7 +10,7 @@ toc::[]
 
 == Introduction
 
-I've been wanting more flexibility to play and experiment with OpenShift. There are a lot of options for how to get OpenShift from hosted solutions like https://www.openshift.com/products/online/[OpenShift Online] to self-hosting on Amazon to running locally on via https://github.com/code-ready/crc[CRC]. These are all great options but I had a few extra desires that made them less than the ideal solution:
+I've been wanting more flexibility to play and experiment with OpenShift. There are a lot of options for how to get OpenShift from hosted solutions like https://www.openshift.com/products/online/[OpenShift Online] to self-hosting on Amazon to running locally via https://github.com/code-ready/crc[CRC]. These are all great options but I had a few extra desires that made them less than the ideal solution:
 
 * I want cluster admin privileges. I'm using this cluster to learn more about what it's like to manage an OpenShift cluster and that requires cluster admin. I also want the option to dig into learning more about Custom Resource Definitions and CRDs require cluster admin.
 * I don't want any recurring costs. AWS might be the cheapest approach overall that hits my other requirements, but I didn't want to have to have to remember to idle things or worry about storage costs, even if they're tiny.
