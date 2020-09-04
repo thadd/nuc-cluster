@@ -1,8 +1,16 @@
-# Building a Light-weight OpenShift Cluster
+= Building a Light-weight OpenShift Cluster
+:sectanchors:
+:sectlinks:
+:sectnumlevels: 6
+:sectnums:
+:toc: macro
+:toclevels: 6
 
-## Introduction
+toc::[]
 
-I've been wanting more flexibility to play and experiment with OpenShift. There are a lot of options for how to get OpenShift from hosted solutions like [OpenShift Online](https://www.openshift.com/products/online/) to self-hosting on Amazon to running locally on via [CRC](https://github.com/code-ready/crc). These are all great options but I had a few extra desires that made them less than the ideal solution:
+== Introduction
+
+I've been wanting more flexibility to play and experiment with OpenShift. There are a lot of options for how to get OpenShift from hosted solutions like https://www.openshift.com/products/online/[OpenShift Online] to self-hosting on Amazon to running locally on via https://github.com/code-ready/crc[CRC]. These are all great options but I had a few extra desires that made them less than the ideal solution:
 
 * I want cluster admin privileges. I'm using this cluster to learn more about what it's like to manage an OpenShift cluster and that requires cluster admin. I also want the option to dig into learning more about Custom Resource Definitions and CRDs require cluster admin.
 * I don't want any recurring costs. AWS might be the cheapest approach overall that hits my other requirements, but I didn't want to have to have to remember to idle things or worry about storage costs, even if they're tiny.
@@ -14,7 +22,7 @@ With all of those (admittedly arbitrary) requirements laid out, I decided to bui
 
 What follows is my experience and all of the headaches I hit along the way. My goal for this document is to provide a step-by-step guide on replicating my setup. I did this in August 2020 and installed OpenShift 4.5; caveats apply that things might have changed by the time you read this.
 
-## Unboxing and Planning
+== Unboxing and Planning
 
 In addition to my 5 NUCs, I picked up or used a few other things as the basis of my cluster:
 
@@ -25,53 +33,53 @@ You'll obviously also need a few things like a USB stick for NUC firmware update
 
 Here's the architecture plan for our cluster:
 
-![Cluster Architecture](cluster-arch.png)
+image::cluster-arch.png[]
 
 You can see we're using the Pi to bridge my home wifi network to the cluster network. There are times when I hooked my MacBook Pro to the wired network so I also needed a way to plug an ethernet cable to my Mac.
 
-## Setting up the NUCs
+== Setting up the NUCs
 
 Here are the steps I took to get the NUCs ready for my cluster. The NUCs I bought came preinstalled with Windows so it was tricky at first to get into BIOS. Mashing F2 (Fn-F2 on my keyboard) caught it reliably.
 
-1. Update the firmware. This was not 100% necessary, but I thought it was best to start with the latest and greatest so I downloaded new firmware from Intel and clicked through the BIOS menus to update.
-2. Turn off secure boot.
-3. Change the boot order to boot from the network first.
-4. Enable "unlimited network boot tries" so it would never go to Windows or the disk OS until I was ready.
-5. Record the MAC addresses of each NUC. We'll use these for DHCP reservations when we set up the pi.
+. Update the firmware. This was not 100% necessary, but I thought it was best to start with the latest and greatest so I downloaded new firmware from Intel and clicked through the BIOS menus to update.
+. Turn off secure boot.
+. Change the boot order to boot from the network first.
+. Enable "unlimited network boot tries" so it would never go to Windows or the disk OS until I was ready.
+. Record the MAC addresses of each NUC. We'll use these for DHCP reservations when we set up the pi.
 
 Once all that was done, I powered off the NUCs and turned my attention to the Pi that would be the gateway to my cluster.
 
-## Setting up the Pi
+== Setting up the Pi
 
 I'll skip the instructions on getting the Raspberry Pi up and running on my network, but I did a very vanilla Raspberry Pi OS (Raspbian) install. It's also a good idea to add your SSH key to the `authorized_keys` on the Pi so that you don't have to worry about password when logging in.
 
 The two additional bits of setup I did was to set the Pi's hostname to `gateway` and give the ethernet interface a static IP address of `10.10.10.1`.
 
-### haproxy
+=== haproxy
 
 OpenShift requires a load balancer in front of your cluster. For my installation, I did this by installing haproxy on my Raspberry Pi (using the built-in package manager) and configuring it for OpenShift traffic.
 
-I've added my config file to this repo at [`haproxy.cfg`](haproxy.cfg). There are no domain names in there so you should be able to copy it directly if you're building a cluster following this guide.
+I've added my config file to this repo at link:haproxy.cfg[`haproxy.cfg`]. There are no domain names in there so you should be able to copy it directly if you're building a cluster following this guide.
 
-### dnsmasq
+=== dnsmasq
 
-The bulk of the work done by the Pi is done by dnsmasq. It provides a DHCP server, a DNS server, and a TFTP server for PXE booting. The full config is at [`dnsmasq.conf`](dnsmasq.conf), but I'm going to copy most of it here to explain the sections.
+The bulk of the work done by the Pi is done by dnsmasq. It provides a DHCP server, a DNS server, and a TFTP server for PXE booting. The full config is at link:dnsmasq.conf[`dnsmasq.conf`], but I'm going to copy most of it here to explain the sections.
 
-```
+....
 expand-hosts
 no-dhcp-interface=wlan0
-```
+....
 
 This section tells dnsmasq to pull hostnames from `/etc/hosts` and not to offer DHCP to our wifi network.
 
-```
+....
 local=/openshift.thadd.dev/
 domain=openshift.thadd.dev
-```
+....
 
-This defines the domain name for our OpenShift cluster. This will need to match the `<cluster_name>.<domain_name>` that you use later in your OpenShift installation.
+This defines the domain name for our OpenShift cluster. This will need to match the `<cluster_name>.<domain_name>` that is used later in our OpenShift installation.
 
-```
+....
 dhcp-range=10.10.10.100,10.10.10.250,12h
 
 dhcp-host=08:00:27:b9:41:18,bootstrap,10.10.10.5
@@ -84,53 +92,86 @@ dhcp-host=1c:69:7a:09:79:e0,worker-0,10.10.10.20
 dhcp-host=1c:69:7a:09:71:e7,worker-1,10.10.10.21
 
 dhcp-host=a0:ce:c8:d2:17:e4,manager,10.10.10.200
-```
+....
 
-These are our DHCP reservations. You'll plug in the MAC addresses of your NUCs here.
+These are our DHCP reservations. The MAC addresses of the NUCs get plugged in here.
 
-For the `bootstrap` line, you'll use the MAC address of your VirtualBox VM that we'll set up later so you can leave this as-is for now and we'll set it when we get to that step.
+For the `bootstrap` line, we use the MAC address of the VirtualBox VM that is set up later so it can be left as-is for now and we'll set it when we get to that step.
 
-The last entry, `manager` is the MAC address for the *wired* connection on my laptop. This is how we'll serve up ignition files and monitor the install process.
+The last entry, `manager` is the MAC address for the *wired* connection on my laptop. This is how I served up ignition files and monitored the install process.
 
-```
+....
 address=/bootstrap.openshift.thadd.dev/10.10.10.5
 address=/master-0.openshift.thadd.dev/10.10.10.10
 address=/master-1.openshift.thadd.dev/10.10.10.11
 address=/master-2.openshift.thadd.dev/10.10.10.12
 address=/worker-0.openshift.thadd.dev/10.10.10.20
 address=/worker-1.openshift.thadd.dev/10.10.10.21
-```
+....
 
 These are DNS records for the cluster machines.
 
-```
+....
 address=/api.openshift.thadd.dev/10.10.10.1
 address=/api-int.openshift.thadd.dev/10.10.10.1
 address=/.apps.openshift.thadd.dev/10.10.10.1
-```
+....
 
-These DNS records are required by OpenShift. Note that they all point back to our Pi which is where our load balancer will run. These DNS records are only accessible _inside_ our network that's managed by the Pi but not outside. We'll handle outside DNS later.
+These DNS records are required by OpenShift. Note that they all point back to our Pi which is where our load balancer runs. These DNS records are only accessible _inside_ our network that's managed by the Pi but not outside. We'll handle outside DNS later.
 
-```
+....
 dhcp-match=set:efi-x86_64,option:client-arch,7
 dhcp-boot=tag:efi-x86_64,grubx64.efi
-```
+....
 
-This section sets up PXE booting for UEFI devices, which includes our NUCs.
+This section sets up PXE booting for UEFI devices, which includes the NUCs.
 
-```
+....
 dhcp-boot=pxelinux/pxelinux.0
-```
+....
 
-Set up PXE booting for non-UEFI clients (our bootstrap VM).
+Set up PXE booting for non-UEFI clients (the bootstrap VM).
 
-```
+....
 enable-tftp
 tftp-root=/var/lib/tftpboot
-```
+....
 
 Set up the TFTP server to send the PXE booting assets to clients.
 
-### TFTP and PXE boot
+=== TFTP and PXE boot
 
-Next we need to create `/var/lib/tftpboot` and start adding assets.
+Next I created `/var/lib/tftpboot` and started adding assets. This is where things got tricky. Below is the file layout of this directory when all was said and done, but I'll explain each group of files as I go.
+
+....
+├── grub.cfg -> ./grub.cfg.bootstrap
+├── grub.cfg-0A0A0A05 -> ./grub.cfg.bootstrap
+├── grub.cfg-0A0A0A0A -> ./grub.cfg.master
+├── grub.cfg-0A0A0A0B -> ./grub.cfg.master
+├── grub.cfg-0A0A0A0C -> ./grub.cfg.master
+├── grub.cfg-0A0A0A14 -> ./grub.cfg.worker
+├── grub.cfg-0A0A0A15 -> ./grub.cfg.worker
+├── grub.cfg.bootstrap
+├── grub.cfg.master
+├── grub.cfg.worker
+├── grubx64.efi
+├── pxelinux
+│   ├── ldlinux.c32
+│   ├── pxelinux.0
+│   └── pxelinux.cfg
+│       └── default
+├── rhcos-installer-initramfs.x86_64.img
+└── rhcos-installer-kernel-x86_64
+....
+
+First things first, I needed to get a few files to support the PXE. I got my CoreOS assets from https://mirror.openshift.com/pub/openshift-v4/dependencies/rhcos/4.5/4.5.6/[here]. Specifically I downloaded the following 2 files and added them to the TFTP root:
+
+* `rhcos-installer-initramfs.x86_64.img`
+* `rhcos-installer-kernel-x86_64`
+
+Next I needed some files from RPMs. I grabbed them from the RHEL RPMs but it would work fine from CentOS or Fedora. If you're on a Mac like me, you can download the RPM files and use `tar` to extract the files from them.
+
+* From `syslinux-tftpboot`, grab `pxelinux.0` and `ldlinux.c32`
+* From `grub2-efi-x64`, grab `grubx64.efi`
+
+Next up was setting up the config files.
