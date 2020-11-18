@@ -91,7 +91,7 @@ Here are the settings I used for my VM:
 ** Make a note of the MAC address
 
 ****
-Note that at least for me, I had to change the adapter type otherwise PXE never downloaded the CoreOS image. (To be perfect honest, I'm not sure if it was changing the adapter type of the promiscuous mode that fixed that issue - I was really at my wits end just toggling things to get it to work - but changing both seems to have no ill effects so just change both).
+Note that at least for me, I had to change the adapter type otherwise PXE never downloaded the CoreOS image. (To be perfect honest, I'm not sure if it was changing the adapter type or the promiscuous mode that fixed that issue - I was really at my wits end just toggling things to get it to work - but changing both seems to have no ill effects so just change both).
 ****
 
 === Setting up the Pi
